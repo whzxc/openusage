@@ -1,21 +1,21 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "OpenUsage",
+  "productName": "Codex Usage",
   "version": "0.6.27",
-  "identifier": "com.sunstory.openusage",
+  "identifier": "com.whzxc.codexusage",
   "build": {
-    "beforeDevCommand": "bun run bundle:plugins && bun run dev",
+    "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run bundle:plugins && bun run build",
+    "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "label": "main",
-        "title": "OpenUsage",
-        "width": 400,
-        "height": 500,
+        "title": "Codex 用量",
+        "width": 420,
+        "height": 620,
         "resizable": false,
         "decorations": false,
         "transparent": true,
@@ -54,17 +54,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/bundled_plugins/**/*",
       "icons/tray-icon.png"
-    ],
-    "createUpdaterArtifacts": true
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2Njk4QTU0MDMzMEY5MTkKUldRWitUQURWSXBwVnFTY1FBWitxNlpaQnB5S3RVWW1qWHJ3NlRuZ2p3c2hPVzNTa3BUR0V0SXkK",
-      "endpoints": [
-        "https://github.com/robinebers/openusage/releases/latest/download/latest.json"
-      ]
-    }
+    ]
   }
 }

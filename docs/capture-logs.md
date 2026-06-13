@@ -1,60 +1,38 @@
-# How to Capture Logs for a Bug Report
+# 捕获日志
 
-Use this when OpenUsage is not working and you need to share debug info.
+当 Codex 用量没有正常显示数据时，用这个文件定位日志。
 
-- Audience: non-technical users
-- Time: ~2 minutes
-- Platform: macOS
+## macOS
 
-## 1) Set log level to Debug
-
-1. In your macOS menu bar, find the OpenUsage icon.
-2. Right-click it (or hold `Control` and click).
-3. Open `Debug Level`.
-4. Select `Debug`.
-
-If OpenUsage does not open at all, skip this step and continue.
-
-## 2) Reproduce the issue once
-
-1. Do the action that fails.
-2. Wait for the failure to happen.
-3. Stop after 1-2 attempts (enough data, less noise).
-
-## 3) Open the log folder in Finder
-
-1. Open Finder.
-2. Press `Shift` + `Command` + `G`.
-3. Paste this path:
+日志通常在：
 
 ```text
-~/Library/Logs/com.sunstory.openusage
+~/Library/Logs/com.whzxc.codexusage/Codex 用量.log
 ```
 
-4. Press `Enter`.
+也可以从界面底部看到日志已准备好的状态。当前精简版没有 Debug Level 菜单。
 
-## 4) Attach log files to your GitHub issue
+## Windows
 
-1. Attach `openusage.log`.
-2. If you also see files like `openusage.log.1`, attach those too.
-3. Drag the files directly into your issue/comment on GitHub.
-
-## 5) Add this context in the same issue comment
-
-Copy/paste and fill:
+日志通常在：
 
 ```text
-What I expected:
-What happened instead:
-When it happened (local time + timezone):
-Which provider was affected (Codex / Claude / Cursor / etc.):
-OpenUsage version:
+%LOCALAPPDATA%\com.whzxc.codexusage\logs\Codex 用量.log
 ```
 
-## Privacy note
+如果路径不存在，先启动一次应用并刷新面板。
 
-Logs are redacted for common secrets, but still review before sharing in public.
+## 排查时记录
 
-## Optional: switch log level back
+复制错误信息时，保留这些上下文：
 
-After sending logs, set `Debug Level` back to `Error`.
+```text
+发生时间：
+系统：
+Codex CLI 是否已登录：
+是否设置 CODEX_HOME：
+界面错误：
+最近的日志行：
+```
+
+日志会记录请求失败、token 刷新失败和 `ccusage` runner 失败。公开分享前仍建议检查一遍日志内容。

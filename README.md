@@ -1,102 +1,69 @@
-# Track all your AI coding subscriptions in one place
+# Codex 用量
 
-See your usage at a glance from your menu bar. No digging through dashboards.
+Codex 用量是一个个人用的 Tauri 桌面面板，只统计 OpenAI Codex 的使用情况。
 
-![OpenUsage Screenshot](screenshot.png)
+它保留了原项目里对接 Codex usage 的核心逻辑，删除了多 provider 插件系统、本地 HTTP API、自动更新、分析上报、代理设置、全局快捷键和复杂设置页。
 
-## Download
+## 支持范围
 
-[**Download the latest release**](https://github.com/robinebers/openusage/releases/latest) (macOS, Apple Silicon & Intel)
+- **支持平台：** macOS 和 Windows。
+- **支持 provider：** 仅 Codex。
+- **远程指标：** Codex session、weekly、code review、credits、reset credits。
+- **本地指标：** 通过 `ccusage codex daily --json` 读取本地 token 和模型分布。
+- **登录来源：** 读取 Codex CLI 的文件凭据。
+- **托盘行为：** macOS 使用原来的 NSPanel 菜单栏面板；Windows 使用以托盘图标为中心、优先向上弹出的普通托盘窗口。
 
-The app auto-updates. Install once and you're set.
+## 使用前提
 
-## What It Does
+先用 Codex CLI 登录，并确保凭据写入文件：
 
-OpenUsage lives in your menu bar and shows you how much of your AI coding subscriptions you've used. Progress bars, badges, and clear labels. No mental math required.
+```bash
+codex login
+```
 
-- **One glance.** All your AI tools, one panel.
-- **Always up-to-date.** Refreshes automatically on a schedule you pick.
-- **Global shortcut.** Toggle the panel from anywhere with a customizable keyboard shortcut.
-- **Lightweight.** Opens instantly, stays out of your way.
-- **Plugin-based.** New providers get added without updating the whole app.
-- **[Local HTTP API](docs/local-http-api.md).** Other apps can read your usage data from `127.0.0.1:6736`.
-- **[Proxy support](docs/proxy.md).** Route provider HTTP requests through a SOCKS5 or HTTP proxy.
+当前版本只读取文件凭据：
 
-## Supported Providers
+- `CODEX_HOME/auth.json`，当 `CODEX_HOME` 存在时只读这个位置。
+- `~/.config/codex/auth.json`
+- `~/.codex/auth.json`
 
-- [**Amp**](docs/providers/amp.md) / free tier, bonus, credits
-- [**Antigravity**](docs/providers/antigravity.md) / all models
-- [**Claude**](docs/providers/claude.md) / session, weekly, extra usage, local token usage (ccusage)
-- [**Codex**](docs/providers/codex.md) / session, weekly, reviews, credits
-- [**Copilot**](docs/providers/copilot.md) / premium, chat, completions
-- [**Cursor**](docs/providers/cursor.md) / credits, total usage, auto usage, API usage, on-demand, CLI auth
-- [**Factory / Droid**](docs/providers/factory.md) / standard, premium tokens
-- [**Grok**](docs/providers/grok.md) / credits used, plan, pay-as-you-go cap
-- [**JetBrains AI Assistant**](docs/providers/jetbrains-ai-assistant.md) / quota, remaining
-- [**Kiro**](docs/providers/kiro.md) / credits, bonus credits, overages
-- [**Kimi Code**](docs/providers/kimi.md) / session, weekly
-- [**MiniMax**](docs/providers/minimax.md) / coding plan session
-- [**OpenCode Go**](docs/providers/opencode-go.md) / 5h, weekly, monthly spend limits
-- [**Devin**](docs/providers/devin.md) / weekly quota, extra usage
-- [**Z.ai**](docs/providers/zai.md) / session, weekly, web searches
+如果你使用 Codex keyring/auto/ephemeral 凭据模式，需要切回文件凭据后再使用这个面板。
 
-Community contributions welcome.
+本地 token 统计需要系统里能运行 `bunx`、`pnpm dlx`、`yarn dlx`、`npm exec` 或 `npx` 之一。应用不会内置 `ccusage`，运行时会按需调用 `ccusage@20.0.2`。
 
-Want a provider that's not listed? [Open an issue.](https://github.com/robinebers/openusage/issues/new)
+## 开发
 
-## Open Source, Community Driven
+```bash
+bun install
+bun run dev
+bun run tauri dev
+```
 
-OpenUsage is built by its users. Hundreds of people use it daily, and the project grows through community contributions: new providers, bug fixes, and ideas.
+常用验证：
 
-I maintain the project as a guide and quality gatekeeper, but this is your app as much as mine. If something is missing or broken, the best way to get it fixed is to contribute by opening an issue, or submitting a PR.
+```bash
+bun run build
+bun run test --run
+cargo test --manifest-path src-tauri/Cargo.toml --lib
+cargo check --manifest-path src-tauri/Cargo.toml
+```
 
-Plugins are currently bundled as we build our the API, but soon will be made flexible so you can build and load their own.
+Windows 构建需要 Visual Studio Build Tools C++ 工具链。普通 PowerShell 没有 `link.exe` 时，用 Developer Command Prompt 或先加载 `VsDevCmd.bat`。
 
-<a href="https://www.star-history.com/?repos=robinebers%2Fopenusage&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=robinebers/openusage&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=robinebers/openusage&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=robinebers/openusage&type=date&legend=top-left" />
- </picture>
-</a>
+## 构建
 
-### How to Contribute
+```bash
+bun run tauri build
+```
 
-- **Add a provider.** Each one is just a plugin. See the [Plugin API](docs/plugins/api.md).
-- **Fix a bug.** PRs welcome. Provide before/after screenshots.
-- **Request a feature.** [Open an issue](https://github.com/robinebers/openusage/issues/new) and make your case.
+macOS 仍保留原 NSPanel 实现。Windows 没有 NSPanel，对应实现会退化为普通 Tauri 窗口，由托盘菜单打开或隐藏，并在打开时从托盘上方向上滑出。
 
-Keep it simple. No feature creep, no AI-generated commit messages, test your changes.
+## 日志
 
-## Built Entirely with AI
+日志路径见 [docs/capture-logs.md](docs/capture-logs.md)。
 
-Not a single line of code in this project was read or written by hand. 100% AI-generated, AI-reviewed, AI-shipped — using [Cursor](https://cursor.com), [Claude Code](https://docs.anthropic.com/en/docs/claude-code), and [Codex CLI](https://github.com/openai/codex).
+前端的 `console.warn` 和 `console.error` 会转发到 Tauri 日志，后端请求和 `ccusage` 失败会写入日志，同时在界面显示友好的错误信息。
 
-OpenUsage is a real-world example of what I teach in the [AI Builder's Blueprint](https://itsbyrob.in/EBDqgJ6) — a proven process for building and shipping software with AI, no coding background required.
-
-## Sponsors
-
-OpenUsage is supported by our sponsors. Become a sponsor to get your logo here and on [openusage.ai](https://openusage.ai).
-
-[Become a Sponsor](https://github.com/sponsors/robinebers)
-
-<!-- Add sponsor logos here -->
-
-## Credits
-
-Inspired by [CodexBar](https://github.com/steipete/CodexBar) by [@steipete](https://github.com/steipete). Same idea, very different approach.
-
-## License
+## 许可
 
 [MIT](LICENSE)
-
----
-
-<details>
-<summary><strong>Build from source</strong></summary>
-
-> **Warning**: The `main` branch may not be stable. It is merged directly without staging, so users are advised to use tagged versions for stable builds. Tagged versions are fully tested while `main` may contain unreleased features.
-
-### Stack
-
-...

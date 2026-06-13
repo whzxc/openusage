@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Version: 0.31 (2026-06-10)
+Version: 0.32 (2026-06-13)
 
-> OpenUsage is a public-facing Tauri desktop app for tracking AI provider usage across plugins.
+> Codex Usage is a personal Tauri desktop app for tracking OpenAI Codex usage on macOS and Windows.
 
 ## Documentation
 
@@ -27,7 +27,7 @@ Version: 0.31 (2026-06-10)
 
 ## Error Handling
 
-Always fail loudly into error logging (e.g., Sentry) and but show friendly errors to the user. Do not add silent fallbacks that hide real problems.
+Always fail loudly into the Tauri log and show friendly errors to the user. Do not add silent fallbacks that hide real problems.
 
 ## UI
 
@@ -76,10 +76,8 @@ When you write the summary at the end, skip the technical jargon. Write like you
 
 ## Before Creating Pull Request
 
-- Before creating a PR or pushing to main, ensure that `README.md` is updated with what plugins are supported.
-- On any plugin change/new plugin, audit plugin-exposed request/response fields against `src-tauri/src/plugin_engine/host_api.rs` redaction lists and add/update tests for gaps. Compare with existing plugins for patterns.
-- In `plugin.json`, set `brandColor` to the provider's real brand color.
-- Plugin SVG logos must use `currentColor` so icon theming works correctly.
+- Before creating a PR or pushing to main, ensure that `README.md` still states that only Codex is supported.
+- Do not reintroduce the old plugin engine, local HTTP API, auto-updater, analytics, proxy UI, or global shortcut unless the user explicitly asks for it.
 - If the PR includes visual changes, refuse to create it without providing before/after screenshots.
 
 ## Project Memories

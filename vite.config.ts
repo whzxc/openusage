@@ -1,14 +1,13 @@
 import path from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [react()],
 
   resolve: {
     alias: {
@@ -19,28 +18,23 @@ export default defineConfig(async () => ({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}", "plugins/**/*.test.js"],
+    include: ["src/**/*.test.{ts,tsx}"],
     exclude: ["**/node_modules/**", "**/src-tauri/target/**"],
     clearMocks: true,
     mockReset: true,
     restoreMocks: true,
     coverage: {
       provider: "v8",
-      include: ["src/**/*.{ts,tsx}", "plugins/**/*.js"],
+      include: ["src/**/*.{ts,tsx}"],
       exclude: [
         "**/*.d.ts",
         "**/*.css",
         "public/**",
         "scripts/**",
         "src-tauri/**",
-        "src-tauri/resources/**",
-        "src-tauri/icons/**",
-        // Test-only helpers (not production code)
-        "plugins/test-helpers.js",
+        "src-tauri/**",
         // Entry point bootstrap (side-effect heavy, hard to unit test)
         "src/main.tsx",
-        // SSR guard branch untestable in jsdom
-        "src/hooks/use-dark-mode.ts",
       ],
       reporter: ["text", "html", "lcov"],
       thresholds: {

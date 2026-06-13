@@ -3,11 +3,10 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 pub fn for_app(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let package_name = app_handle.package_info().name.clone();
     app_handle
         .path()
         .app_log_dir()
-        .map(|dir| log_file_path(&dir, &package_name))
+        .map(|dir| log_file_path(&dir, "Codex 用量"))
         .map_err(|error| error.to_string())
 }
 
@@ -22,11 +21,8 @@ mod tests {
 
     #[test]
     fn builds_log_file_path_from_log_dir() {
-        let path = log_file_path(&PathBuf::from("/logs/openusage"), "OpenUsage");
+        let path = log_file_path(&PathBuf::from("/logs/codex-usage"), "Codex 用量");
 
-        assert_eq!(
-            path,
-            PathBuf::from("/logs/openusage/OpenUsage.log")
-        );
+        assert_eq!(path, PathBuf::from("/logs/codex-usage/Codex 用量.log"));
     }
 }

@@ -1,129 +1,125 @@
-# Codex
+# Codex 用量
 
-> Reverse-engineered, undocumented API. May change without notice.
+> Codex usage 接口是未公开接口，可能随 OpenAI 调整而变化。
 
-## Overview
+## 读取内容
 
-- **Protocol:** REST (plain JSON)
-- **Base URL:** `https://chatgpt.com`
-- **Auth provider:** `auth.openai.com` (OAuth 2.0)
-- **Client ID:** `app_EMoamEEZ73f0CkXaXp7hrann`
-- **Percentages:** integers (0-100)
-- **Timestamps:** unix seconds
-- **Window durations:** seconds (18000 = 5h, 604800 = 7d)
+Codex 用量只读取 Codex 相关数据：
 
-## Endpoints
+- 5 小时 session 使用率。
+- 7 天 weekly 使用率。
+- code review 使用率。
+- credits 余额和按 `$0.04` 估算的美元价值。
+- reset credits 可用数量。
+- 本地 `ccusage` 汇总的今日、昨日、近 30 天 token 和模型分布。
 
-### GET /backend-api/wham/usage
+## 远程接口
 
-Returns rate limit windows, optional credits, and available on-demand rate limit resets.
+```text
+GET https://chatgpt.com/backend-api/wham/usage
+```
 
-#### Headers
+请求头：
 
-| Header | Required | Value |
+| 请求头 | 是否必需 | 值 |
 |---|---|---|
 | Authorization | yes | `Bearer <access_token>` |
 | Accept | yes | `application/json` |
 | ChatGPT-Account-Id | no | `<account_id>` |
 
-#### Response
+响应里的主要字段：
 
 ```jsonc
 {
-  "plan_type": "plus",                     // plan tier
+  "plan_type": "prolite",
   "rate_limit": {
     "primary_window": {
-      "used_percent": 6,                   // % used in 5h rolling window
-      "reset_at": 1738300000,              // unix seconds
-      "limit_window_seconds": 18000        // 5 hours
+      "used_percent": 6,
+      "reset_at": 1780000000,
+      "limit_window_seconds": 18000
     },
     "secondary_window": {
-      "used_percent": 24,                  // % used in 7-day window
-      "reset_at": 1738900000,
-      "limit_window_seconds": 604800       // 7 days
-    }
-  },
-  "code_review_rate_limit": {              // separate weekly code review limit (optional)
-    "primary_window": {
-      "used_percent": 0,
-      "reset_at": 1738900000,
+      "used_percent": 24,
+      "reset_after_seconds": 120,
       "limit_window_seconds": 604800
     }
   },
-  "credits": {                             // purchased credits (optional)
-    "has_credits": true,
-    "unlimited": false,
-    "balance": 820.6969075                 // remaining credits
+  "code_review_rate_limit": {
+    "primary_window": {
+      "used_percent": 3,
+      "reset_at": 1780600000,
+      "limit_window_seconds": 604800
+    }
   },
-  "rate_limit_reset_credits": {            // on-demand resets (optional)
+  "credits": {
+    "balance": 820.6969075
+  },
+  "rate_limit_reset_credits": {
     "available_count": 1
   }
 }
 ```
 
-Both rate_limit windows are enforced simultaneously — hitting either limit throttles the user.
+`prolite` 显示为 `Pro 5x`，`pro` 显示为 `Pro 20x`。credits 余额会向下取整展示，美元价值按每 credit `$0.04` 计算。
 
-OpenUsage floors the remaining credit balance to a whole number and displays its fixed USD
-equivalent at `$0.04` per credit. For example, `820.6969075` renders as
-`$32.80 · 820 credits`. The credit balance is unbounded; the API does not provide a maximum.
+## 登录文件
 
-When available, OpenUsage displays the on-demand reset count as the first detail text metric,
-for example `1 available`.
+当前实现只读取 Codex CLI 文件凭据，不读取 macOS keychain 或 Windows Credential Manager。
 
-## Authentication
+读取顺序：
 
-### Credential Storage Locations
-
-Codex CLI supports multiple credential storage modes:
-
-- **file** (default): `CODEX_HOME/auth.json` (or `~/.codex/auth.json` by default)
-- **keyring**: OS keychain/credential manager entry (service name `Codex Auth`)
-- **auto**: keyring first, fallback to file
-- **ephemeral**: memory-only (no persistence)
-
-For `keyring`/`auto`, Codex may not keep `auth.json` on disk. If keyring save succeeds, Codex removes the fallback `auth.json`.
-
-OpenUsage Codex plugin auth lookup order:
-
-1. `CODEX_HOME/auth.json` (when `CODEX_HOME` is set)
+1. `CODEX_HOME/auth.json`，当 `CODEX_HOME` 存在时只读这个位置。
 2. `~/.config/codex/auth.json`
 3. `~/.codex/auth.json`
-4. macOS keychain service `Codex Auth` (fallback)
 
-If file-based OAuth credentials are missing, invalid, or fail with an auth/session error during refresh or usage lookup, OpenUsage tries the macOS keychain fallback. Non-auth usage failures, such as server errors or invalid responses, are shown directly.
-
-Keychain fallback is available on macOS only.
-
-Expected auth payload shape (file or keychain JSON value):
+期望文件结构：
 
 ```jsonc
 {
-  "OPENAI_API_KEY": null,                  // legacy API key field
+  "OPENAI_API_KEY": null,
   "tokens": {
-    "access_token": "<jwt>",               // OAuth access token (Bearer)
+    "access_token": "<jwt>",
     "refresh_token": "<token>",
-    "id_token": "<jwt>",                   // OpenID Connect ID token
-    "account_id": "<uuid>"                 // sent as ChatGPT-Account-Id header
+    "id_token": "<jwt>",
+    "account_id": "<uuid>"
   },
-  "last_refresh": "2026-01-28T08:05:37Z"  // ISO 8601
+  "last_refresh": "2026-01-28T08:05:37Z"
 }
 ```
 
-> Note: Codex also stores MCP OAuth tokens in `~/.codex/.credentials.json` (or keyring), but that is separate from ChatGPT CLI auth used by this plugin.
+如果文件里只有 `OPENAI_API_KEY`，应用会报错，因为 Codex usage 需要 ChatGPT OAuth token。
 
-### Token Refresh
+## Token 刷新
 
-Access tokens are short-lived JWTs. Refreshed when `last_refresh` is older than 8 days, or on 401/403.
+当 usage 请求返回 401 或 403 时，应用会用 refresh token 请求：
 
-```
+```text
 POST https://auth.openai.com/oauth/token
 Content-Type: application/x-www-form-urlencoded
 ```
 
-```
+```text
 grant_type=refresh_token
 &client_id=app_EMoamEEZ73f0CkXaXp7hrann
 &refresh_token=<refresh_token>
 ```
 
-Response returns new `access_token`, and optionally new `refresh_token` and `id_token`.
+刷新成功后会把新的 token 写回原 `auth.json`。刷新失败时，界面会提示重新运行 `codex login`。
+
+## 本地 ccusage
+
+应用不会打包 `ccusage`。运行时按顺序查找这些 runner：
+
+1. `bunx`
+2. `pnpm dlx`
+3. `yarn dlx`
+4. `npm exec`
+5. `npx`
+
+找到后执行：
+
+```bash
+ccusage@20.0.2 codex daily --json --order desc
+```
+
+如果没有可用 runner，远程 usage 仍会显示，本地 usage 区域会标记为 runner 缺失。
