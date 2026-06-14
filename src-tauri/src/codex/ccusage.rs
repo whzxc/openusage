@@ -307,9 +307,11 @@ pub fn collect_local_usage_summary(
 
     let mut today_usage = CodexDayUsage::empty("今日");
     let mut yesterday_usage = CodexDayUsage::empty("昨日");
+    let mut last_7_days = CodexDayUsage::empty("近 7 天");
     let mut last_30_days = CodexDayUsage::empty("近 30 天");
     let mut model_tokens = std::collections::BTreeMap::<String, u64>::new();
     let mut total_model_tokens = 0_u64;
+    let today_date = date_from_day_key(today);
 
     for day in daily {
         let Some(key) = day.get("date").and_then(Value::as_str).and_then(day_key) else {
@@ -326,9 +328,15 @@ pub fn collect_local_usage_summary(
             yesterday_usage.tokens = tokens;
             yesterday_usage.cost_usd = cost_usd;
         }
-        last_30_days.tokens = last_30_days.tokens.saturating_add(tokens);
-        if let Some(cost) = cost_usd {
-            last_30_days.cost_usd = Some(last_30_days.cost_usd.unwrap_or(0.0) + cost);
+
+        if let (Some(today_date), Some(day_date)) = (today_date, date_from_day_key(&key)) {
+            let age_days = today_date.to_julian_day() - day_date.to_julian_day();
+            if (0..7).contains(&age_days) {
+                add_day_usage(&mut last_7_days, tokens, cost_usd);
+            }
+            if (0..30).contains(&age_days) {
+                add_day_usage(&mut last_30_days, tokens, cost_usd);
+            }
         }
 
         if let Some(models) = day.get("models").and_then(Value::as_object) {
@@ -360,6 +368,7 @@ pub fn collect_local_usage_summary(
     Ok(CodexLocalUsageSummary {
         today: today_usage,
         yesterday: yesterday_usage,
+        last_7_days,
         last_30_days,
         models,
     })
@@ -426,29 +435,44 @@ fn day_key(raw: &str) -> Option<String> {
     None
 }
 
-fn previous_day_key(today: &str) -> Option<String> {
-    let parts: Vec<_> = today.split('-').collect();
+fn date_from_day_key(key: &str) -> Option<time::Date> {
+    let parts: Vec<_> = key.split('-').collect();
     if parts.len() != 3 {
         return None;
     }
     let year = parts[0].parse().ok()?;
-    let month = match parts[1].parse::<u8>().ok()? {
-        1 => time::Month::January,
-        2 => time::Month::February,
-        3 => time::Month::March,
-        4 => time::Month::April,
-        5 => time::Month::May,
-        6 => time::Month::June,
-        7 => time::Month::July,
-        8 => time::Month::August,
-        9 => time::Month::September,
-        10 => time::Month::October,
-        11 => time::Month::November,
-        12 => time::Month::December,
-        _ => return None,
-    };
+    let month = month_from_u8(parts[1].parse().ok()?)?;
     let day = parts[2].parse().ok()?;
-    let date = time::Date::from_calendar_date(year, month, day).ok()?;
+    time::Date::from_calendar_date(year, month, day).ok()
+}
+
+fn month_from_u8(value: u8) -> Option<time::Month> {
+    match value {
+        1 => Some(time::Month::January),
+        2 => Some(time::Month::February),
+        3 => Some(time::Month::March),
+        4 => Some(time::Month::April),
+        5 => Some(time::Month::May),
+        6 => Some(time::Month::June),
+        7 => Some(time::Month::July),
+        8 => Some(time::Month::August),
+        9 => Some(time::Month::September),
+        10 => Some(time::Month::October),
+        11 => Some(time::Month::November),
+        12 => Some(time::Month::December),
+        _ => None,
+    }
+}
+
+fn add_day_usage(total: &mut CodexDayUsage, tokens: u64, cost_usd: Option<f64>) {
+    total.tokens = total.tokens.saturating_add(tokens);
+    if let Some(cost) = cost_usd {
+        total.cost_usd = Some(total.cost_usd.unwrap_or(0.0) + cost);
+    }
+}
+
+fn previous_day_key(today: &str) -> Option<String> {
+    let date = date_from_day_key(today)?;
     let previous = date.previous_day()?;
     Some(format!(
         "{:04}-{:02}-{:02}",
@@ -459,49 +483,5 @@ fn previous_day_key(today: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn normalize_ccusage_output_converts_array_to_daily_object() {
-        let normalized = normalize_ccusage_output("noise\n[]\n").expect("normalized output");
-        let value: serde_json::Value = serde_json::from_str(&normalized).expect("valid json");
-
-        assert_eq!(value, serde_json::json!({ "daily": [] }));
-    }
-
-    #[test]
-    fn collect_local_usage_summary_reads_today_yesterday_total_and_models() {
-        let daily = serde_json::json!({
-            "daily": [
-                {
-                    "date": "2026-06-12",
-                    "totalTokens": 1000,
-                    "costUSD": 0.5,
-                    "models": {
-                        "gpt-5.5": { "totalTokens": 1000 }
-                    }
-                },
-                {
-                    "date": "2026-06-13",
-                    "totalTokens": 3000,
-                    "costUSD": 1.25,
-                    "models": {
-                        "gpt-5.5": { "totalTokens": 2000 },
-                        "gpt-5.4": { "inputTokens": 700, "outputTokens": 300 }
-                    }
-                }
-            ]
-        });
-
-        let summary = collect_local_usage_summary(&daily, "2026-06-13").expect("summary");
-
-        assert_eq!(summary.today.tokens, 3000);
-        assert_eq!(summary.yesterday.tokens, 1000);
-        assert_eq!(summary.last_30_days.tokens, 4000);
-        assert_eq!(summary.models[0].name, "gpt-5.5");
-        assert_eq!(summary.models[0].tokens, 3000);
-        assert_eq!(summary.models[1].name, "gpt-5.4");
-        assert_eq!(summary.models[1].tokens, 1000);
-    }
-}
+#[path = "ccusage_tests.rs"]
+mod tests;

@@ -26,6 +26,11 @@ fn get_log_path(app_handle: tauri::AppHandle) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn quit_app(app_handle: tauri::AppHandle) {
+    app_handle.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -49,6 +54,7 @@ pub fn run() {
             get_codex_usage,
             refresh_codex_usage,
             get_log_path,
+            quit_app,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

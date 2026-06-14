@@ -6,6 +6,18 @@ import {
   enable as enableAutostart,
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart"
+import {
+  calculateMetricPace,
+  clampPercent,
+  formatAutoRefreshCountdown,
+  formatCost,
+  formatFixedReset,
+  formatOptionalNumber,
+  formatPercent,
+  formatResetCountdown,
+  formatTokens,
+  localUsageStatusLabel,
+} from "./usageFormat"
 
 type CodexMetric = {
   label: string
@@ -29,6 +41,7 @@ type CodexModelUsage = {
 type CodexLocalUsageSummary = {
   today: CodexDayUsage
   yesterday: CodexDayUsage
+  last7Days?: CodexDayUsage | null
   last30Days: CodexDayUsage
   models: CodexModelUsage[]
 }
@@ -37,17 +50,16 @@ type CodexUsageSnapshot = {
   plan?: string | null
   session?: CodexMetric | null
   weekly?: CodexMetric | null
-  reviews?: CodexMetric | null
-  creditsRemaining?: number | null
-  creditsUsd?: number | null
   resetCreditsAvailable?: number | null
   localUsage?: CodexLocalUsageSummary | null
   localUsageStatus: string
   fetchedAt: string
 }
 
+type ResetDisplayMode = "relative" | "fixed"
+
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000
-const COUNTDOWN_INTERVAL_MS = 60 * 1000
+const COUNTDOWN_INTERVAL_MS = 1000
 
 function App() {
   const [snapshot, setSnapshot] = useState<CodexUsageSnapshot | null>(null)
@@ -56,9 +68,9 @@ function App() {
   const [refreshing, setRefreshing] = useState(false)
   const [autostartEnabled, setAutostartEnabled] = useState(false)
   const [autostartLoading, setAutostartLoading] = useState(false)
-  const [logPath, setLogPath] = useState<string | null>(null)
-  const [animationKey, setAnimationKey] = useState(0)
+  const [panelOpen, setPanelOpen] = useState(() => !isTauriRuntime())
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [resetDisplayMode, setResetDisplayMode] = useState<ResetDisplayMode>("relative")
 
   const loadSnapshot = useCallback(async (manual: boolean) => {
     if (manual) {
@@ -100,32 +112,54 @@ function App() {
         const message = errorMessage(rawError)
         console.warn("Failed to read autostart state:", message)
       })
-
-    void invoke<string>("get_log_path")
-      .then(setLogPath)
-      .catch((rawError) => {
-        const message = errorMessage(rawError)
-        console.warn("Failed to read log path:", message)
-      })
   }, [])
 
   useEffect(() => {
     let disposed = false
-    let unlisten: (() => void) | undefined
+    let animationFrame: number | undefined
+    let unlistenShow: (() => void) | undefined
+    let unlistenHide: (() => void) | undefined
 
-    void listen("panel-will-show", () => {
-      setAnimationKey((key) => key + 1)
+    const cancelAnimationFrameIfNeeded = () => {
+      if (animationFrame !== undefined) {
+        window.cancelAnimationFrame(animationFrame)
+        animationFrame = undefined
+      }
+    }
+
+    void listen("panel-did-show", () => {
+      cancelAnimationFrameIfNeeded()
+      setPanelOpen(false)
+      animationFrame = window.requestAnimationFrame(() => {
+        if (!disposed) {
+          setPanelOpen(true)
+        }
+        animationFrame = undefined
+      })
     }).then((nextUnlisten) => {
       if (disposed) {
         nextUnlisten()
       } else {
-        unlisten = nextUnlisten
+        unlistenShow = nextUnlisten
+      }
+    })
+
+    void listen("panel-did-hide", () => {
+      cancelAnimationFrameIfNeeded()
+      setPanelOpen(false)
+    }).then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten()
+      } else {
+        unlistenHide = nextUnlisten
       }
     })
 
     return () => {
       disposed = true
-      unlisten?.()
+      cancelAnimationFrameIfNeeded()
+      unlistenShow?.()
+      unlistenHide?.()
     }
   }, [])
 
@@ -162,29 +196,54 @@ function App() {
     }
   }, [autostartEnabled])
 
+  const handleQuit = useCallback(() => {
+    void invoke("quit_app").catch((rawError) => {
+      const message = errorMessage(rawError)
+      console.error("Failed to quit app:", message)
+      setError(message)
+    })
+  }, [])
+
   const localUsage = snapshot?.localUsage
-  const limitMetrics = useMemo(
-    () => [snapshot?.session, snapshot?.weekly, snapshot?.reviews].filter(Boolean) as CodexMetric[],
-    [snapshot],
-  )
+  const tokenRows = useMemo(() => {
+    if (!localUsage) return []
+    return [localUsage.today, localUsage.last7Days, localUsage.last30Days].filter(
+      Boolean,
+    ) as CodexDayUsage[]
+  }, [localUsage])
   const visibleModels = localUsage?.models.slice(0, 2) ?? []
 
   return (
-    <main className="panel" data-testid="codex-panel">
-      <section className="panel-card" key={animationKey}>
+    <main className={`panel ${panelOpen ? "is-open" : "is-entering"}`} data-testid="codex-panel">
+      <section className="panel-card">
         <header className="panel-header">
-          <div>
+          <div className="title-stack">
             <p className="eyebrow">OpenAI Codex</p>
-            <h1>Codex 用量</h1>
+            <div className="title-row">
+              <h1>Codex 用量</h1>
+              {snapshot ? (
+                <div className="tag-row" aria-label="Codex Account Summary">
+                  <span className="tag">{snapshot.plan ?? "未知计划"}</span>
+                  <span className="tag">{formatResetCredits(snapshot.resetCreditsAvailable)}</span>
+                </div>
+              ) : null}
+            </div>
           </div>
-          <button
-            className="button"
-            type="button"
-            onClick={handleRefresh}
-            disabled={loading || refreshing}
-          >
-            {refreshing ? "刷新中" : "刷新"}
-          </button>
+          <div className="refresh-stack">
+            <button
+              className="button"
+              type="button"
+              onClick={handleRefresh}
+              disabled={loading || refreshing}
+            >
+              {refreshing ? "刷新中" : "刷新"}
+            </button>
+            {snapshot ? (
+              <span className="auto-refresh" data-testid="auto-refresh-countdown">
+                {formatAutoRefreshCountdown(snapshot.fetchedAt, nowMs, REFRESH_INTERVAL_MS)}
+              </span>
+            ) : null}
+          </div>
         </header>
 
         {error ? (
@@ -193,72 +252,78 @@ function App() {
           <LoadingState />
         ) : snapshot ? (
           <>
-            <section className="summary-grid" aria-label="Codex Summary">
-              <SummaryTile label="计划" value={snapshot.plan ?? "未知"} />
-              <SummaryTile
-                label="额度"
-                value={formatOptionalNumber(snapshot.creditsRemaining)}
-                detail={formatCreditValue(snapshot.creditsUsd)}
-              />
-              <SummaryTile
-                label="重置次数"
-                value={formatOptionalNumber(snapshot.resetCreditsAvailable)}
-              />
-            </section>
-
-            <section className="section">
+            <section className="section limit-section" aria-label="Codex Limit Summary">
               <div className="section-title">
-                <h2>远程限额</h2>
-                <span>{formatFetchedAt(snapshot.fetchedAt)}</span>
-              </div>
-              {limitMetrics.length > 0 ? (
-                <div className="metric-list">
-                  {limitMetrics.map((metric) => (
-                    <LimitMetric key={metric.label} metric={metric} nowMs={nowMs} />
-                  ))}
+                <h2>限额</h2>
+                <div className="segmented" aria-label="重置时间展示模式">
+                  <button
+                    type="button"
+                    className={resetDisplayMode === "relative" ? "active" : ""}
+                    aria-pressed={resetDisplayMode === "relative"}
+                    onClick={() => setResetDisplayMode("relative")}
+                  >
+                    剩余时间
+                  </button>
+                  <button
+                    type="button"
+                    className={resetDisplayMode === "fixed" ? "active" : ""}
+                    aria-pressed={resetDisplayMode === "fixed"}
+                    onClick={() => setResetDisplayMode("fixed")}
+                  >
+                    固定时间
+                  </button>
                 </div>
-              ) : (
-                <EmptyLine label="暂无远程限额数据" />
-              )}
+              </div>
+              <div className="limit-stack">
+                {snapshot.weekly ? (
+                  <LimitMetric
+                    metric={snapshot.weekly}
+                    nowMs={nowMs}
+                    resetDisplayMode={resetDisplayMode}
+                    variant="primary"
+                    testId="weekly-limit"
+                  />
+                ) : (
+                  <EmptyLine label="暂无周限额数据" />
+                )}
+                {snapshot.session ? (
+                  <LimitMetric
+                    metric={snapshot.session}
+                    nowMs={nowMs}
+                    resetDisplayMode={resetDisplayMode}
+                    variant="secondary"
+                    testId="session-limit"
+                  />
+                ) : null}
+              </div>
             </section>
 
-            <section className="section">
+            <section className="section token-section">
               <div className="section-title">
-                <h2>本地 token</h2>
+                <h2>Token 消耗</h2>
                 <span>{localUsageStatusLabel(snapshot.localUsageStatus)}</span>
               </div>
-              {localUsage ? (
-                <div className="usage-grid">
-                  <UsageTile usage={localUsage.today} />
-                  <UsageTile usage={localUsage.yesterday} />
-                  <UsageTile usage={localUsage.last30Days} />
+              {tokenRows.length ? (
+                <div className="token-list">
+                  {tokenRows.map((usage) => (
+                    <TokenRow key={usage.label} usage={usage} />
+                  ))}
                 </div>
               ) : (
                 <EmptyLine label="暂无本地 token 数据" />
               )}
             </section>
 
-            <section className="section">
-              <div className="section-title">
-                <h2>模型</h2>
-                <span>
-                  {localUsage?.models.length
-                    ? localUsage.models.length > visibleModels.length
-                      ? `前 ${visibleModels.length} / ${localUsage.models.length} 个活跃`
-                      : `${localUsage.models.length} 个活跃`
-                    : "暂无"}
-                </span>
-              </div>
-              {visibleModels.length ? (
-                <div className="model-list">
+            {visibleModels.length ? (
+              <section className="model-strip" aria-label="模型">
+                <span>模型</span>
+                <div>
                   {visibleModels.map((model) => (
-                    <ModelRow key={model.name} model={model} />
+                    <ModelChip key={model.name} model={model} />
                   ))}
                 </div>
-              ) : (
-                <EmptyLine label="暂无模型明细" />
-              )}
-            </section>
+              </section>
+            ) : null}
           </>
         ) : null}
 
@@ -272,33 +337,44 @@ function App() {
             />
             <span>开机启动</span>
           </label>
-          {logPath ? <span className="log-path" title={logPath}>日志已就绪</span> : null}
+          <button className="footer-button" type="button" onClick={handleQuit}>
+            退出
+          </button>
         </footer>
       </section>
     </main>
   )
 }
 
-function SummaryTile({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return (
-    <article className="summary-tile">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      {detail ? <small>{detail}</small> : null}
-    </article>
-  )
-}
-
-function LimitMetric({ metric, nowMs }: { metric: CodexMetric; nowMs: number }) {
-  const remainingPercent = clampPercent(100 - metric.usedPercent)
-  const resetCountdown = metric.resetsAt ? formatResetCountdown(metric.resetsAt, nowMs) : null
+function LimitMetric({
+  metric,
+  nowMs,
+  resetDisplayMode,
+  variant,
+  testId,
+}: {
+  metric: CodexMetric
+  nowMs: number
+  resetDisplayMode: ResetDisplayMode
+  variant: "primary" | "secondary"
+  testId: string
+}) {
+  const usedPercent = clampPercent(metric.usedPercent)
+  const remainingPercent = clampPercent(100 - usedPercent)
   const pace = calculateMetricPace(metric, nowMs)
+  const resetText =
+    resetDisplayMode === "fixed"
+      ? formatFixedReset(metric.resetsAt)
+      : formatResetCountdown(metric.resetsAt, nowMs)
 
   return (
-    <article className="limit-metric">
+    <article className={`limit-metric ${variant}`} data-testid={testId}>
       <div className="metric-copy">
-        <span>{metric.label}</span>
-        <strong>{formatPercent(remainingPercent)}</strong>
+        <div>
+          <span>{metric.label}</span>
+          <small>已用 {formatPercent(usedPercent)}</small>
+        </div>
+        <strong>{formatPercent(remainingPercent)} 剩余</strong>
       </div>
       <div className="progress-track" aria-label={`${metric.label} 剩余 ${formatPercent(remainingPercent)}`}>
         <div className="progress-fill" style={{ width: `${remainingPercent}%` }} />
@@ -311,17 +387,16 @@ function LimitMetric({ metric, nowMs }: { metric: CodexMetric; nowMs: number }) 
         ) : null}
       </div>
       <div className="metric-reset-row">
-        <small>{metric.resetsAt ? `${formatReset(metric.resetsAt)} 重置` : "重置时间未知"}</small>
-        {resetCountdown ? <small>{resetCountdown}</small> : null}
+        <small>{resetText}</small>
+        {pace ? <small>{pace.label}</small> : null}
       </div>
-      {pace ? <small className="pace-line">{pace.label}</small> : null}
     </article>
   )
 }
 
-function UsageTile({ usage }: { usage: CodexDayUsage }) {
+function TokenRow({ usage }: { usage: CodexDayUsage }) {
   return (
-    <article className="usage-tile">
+    <article className="token-row">
       <span>{usage.label}</span>
       <strong>{formatTokens(usage.tokens)}</strong>
       <small>{formatCost(usage.costUsd)}</small>
@@ -329,17 +404,12 @@ function UsageTile({ usage }: { usage: CodexDayUsage }) {
   )
 }
 
-function ModelRow({ model }: { model: CodexModelUsage }) {
-  const percent = clampPercent(model.percent)
-
+function ModelChip({ model }: { model: CodexModelUsage }) {
   return (
-    <article className="model-row">
-      <div>
-        <strong>{model.name}</strong>
-        <small>{formatTokens(model.tokens)}</small>
-      </div>
-      <span>{formatPercent(percent)}</span>
-    </article>
+    <span className="model-chip">
+      <span>{model.name}</span>
+      <strong>{formatPercent(clampPercent(model.percent))}</strong>
+    </span>
   )
 }
 
@@ -365,127 +435,19 @@ function EmptyLine({ label }: { label: string }) {
   return <div className="empty-line">{label}</div>
 }
 
+function formatResetCredits(value?: number | null): string {
+  if (value === null || value === undefined) return "可重置 未知"
+  return `可重置 ${formatOptionalNumber(value)} 次`
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   if (typeof error === "string") return error
   return "未知错误"
 }
 
-function clampPercent(value: number): number {
-  if (!Number.isFinite(value)) return 0
-  return Math.min(100, Math.max(0, value))
-}
-
-function formatPercent(value: number): string {
-  return `${Math.round(value)}%`
-}
-
-function formatTokens(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    notation: value >= 1_000_000 ? "compact" : "standard",
-    maximumFractionDigits: 1,
-  }).format(value)
-}
-
-function formatCost(value?: number | null): string {
-  if (value === null || value === undefined) return "费用未知"
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value)
-}
-
-function formatCreditValue(value?: number | null): string | undefined {
-  if (value === null || value === undefined) return undefined
-  return `价值 ${formatCost(value)}`
-}
-
-function formatOptionalNumber(value?: number | null): string {
-  if (value === null || value === undefined) return "未知"
-  return new Intl.NumberFormat("en-US").format(value)
-}
-
-function formatFetchedAt(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "刚刚获取"
-  return `${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 获取`
-}
-
-function formatReset(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "稍后"
-  return date.toLocaleString("zh-CN", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
-function formatResetCountdown(value: string, nowMs: number): string | null {
-  const resetsAtMs = Date.parse(value)
-  if (!Number.isFinite(resetsAtMs) || !Number.isFinite(nowMs)) return null
-  const remainingMs = resetsAtMs - nowMs
-  if (remainingMs <= 0) return "已重置"
-  return `还剩 ${formatDuration(remainingMs)}`
-}
-
-function formatDuration(valueMs: number): string {
-  const totalMinutes = Math.max(1, Math.ceil(valueMs / 60_000))
-  const days = Math.floor(totalMinutes / 1_440)
-  const hours = Math.floor((totalMinutes % 1_440) / 60)
-  const minutes = totalMinutes % 60
-
-  if (days > 0) {
-    return hours > 0 ? `${days} 天 ${hours} 小时` : `${days} 天`
-  }
-  if (hours > 0) {
-    return minutes > 0 ? `${hours} 小时 ${minutes} 分` : `${hours} 小时`
-  }
-  return `${minutes} 分`
-}
-
-function calculateMetricPace(metric: CodexMetric, nowMs: number) {
-  if (!metric.resetsAt || !metric.periodDurationMs || metric.periodDurationMs <= 0) return null
-  const resetsAtMs = Date.parse(metric.resetsAt)
-  if (!Number.isFinite(resetsAtMs) || !Number.isFinite(nowMs)) return null
-
-  const elapsedMs = nowMs - (resetsAtMs - metric.periodDurationMs)
-  if (elapsedMs <= 0 || nowMs >= resetsAtMs) return null
-
-  const elapsedPercent = clampPercent((elapsedMs / metric.periodDurationMs) * 100)
-  const usedPercent = clampPercent(metric.usedPercent)
-  const deltaPercent = Math.round(usedPercent - elapsedPercent)
-  const timeText = formatPercent(elapsedPercent)
-  const usedText = formatPercent(usedPercent)
-
-  if (deltaPercent === 0) {
-    return {
-      elapsedPercent,
-      timeRemainingPercent: clampPercent(100 - elapsedPercent),
-      label: `已用 ${usedText} · 时间 ${timeText} · 持平`,
-    }
-  }
-
-  return {
-    elapsedPercent,
-    timeRemainingPercent: clampPercent(100 - elapsedPercent),
-    label: `已用 ${usedText} · 时间 ${timeText} · ${deltaPercent > 0 ? "快" : "慢"} ${Math.abs(deltaPercent)}%`,
-  }
-}
-
-function localUsageStatusLabel(status: string): string {
-  switch (status) {
-    case "ok":
-      return "ccusage 就绪"
-    case "no_runner":
-      return "runner 缺失"
-    case "runner_failed":
-      return "ccusage 失败"
-    default:
-      return "未检查"
-  }
+function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
 
 export { App }

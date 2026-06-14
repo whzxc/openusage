@@ -8,10 +8,10 @@ Codex 用量是一个个人用的 Tauri 桌面面板，只统计 OpenAI Codex �
 
 - **支持平台：** macOS 和 Windows。
 - **支持 provider：** 仅 Codex。
-- **远程指标：** Codex session、weekly、code review、credits、reset credits。
-- **本地指标：** 通过 `ccusage codex daily --json` 读取本地 token 和模型分布。
+- **远程指标：** Codex weekly、5 小时 session、订阅类型、reset credits。
+- **本地指标：** 通过 `ccusage codex daily --json` 读取今日、近 7 天、近 30 天 token、美元价格和模型分布。
 - **登录来源：** 读取 Codex CLI 的文件凭据。
-- **托盘行为：** macOS 使用原来的 NSPanel 菜单栏面板；Windows 使用以托盘图标为中心、优先向上弹出的普通托盘窗口。
+- **托盘行为：** macOS 使用原来的 NSPanel 菜单栏面板；Windows 使用不显示任务栏图标的临时托盘窗口，点击其它地方会自动收回。托盘左右键点击都只切换面板，不显示右键菜单。
 
 ## 使用前提
 
@@ -56,7 +56,7 @@ Windows 构建需要 Visual Studio Build Tools C++ 工具链。普通 PowerShell
 bun run tauri build
 ```
 
-macOS 仍保留原 NSPanel 实现。Windows 没有 NSPanel，对应实现会退化为普通 Tauri 窗口，由托盘菜单打开或隐藏，并在打开时从托盘上方向上滑出。
+macOS 仍保留原 NSPanel 实现。Windows 没有 NSPanel，对应实现使用跳过任务栏的临时 Tauri 窗口，由托盘图标点击打开或隐藏，打开时带有轻量弹出动画，失焦后自动隐藏。
 
 ## 日志
 

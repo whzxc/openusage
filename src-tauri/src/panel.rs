@@ -103,14 +103,6 @@ mod platform {
         }
     }
 
-    pub fn show_panel(app_handle: &AppHandle) {
-        if let Some(panel) = get_or_init_panel!(app_handle) {
-            let _ = app_handle.emit("panel-will-show", ());
-            panel.show_and_make_key();
-            position_panel_from_tray(app_handle);
-        }
-    }
-
     pub fn toggle_panel(app_handle: &AppHandle) {
         let Some(panel) = get_or_init_panel!(app_handle) else {
             return;
@@ -118,10 +110,11 @@ mod platform {
 
         if panel.is_visible() {
             panel.hide();
+            let _ = app_handle.emit("panel-did-hide", ());
         } else {
-            let _ = app_handle.emit("panel-will-show", ());
             panel.show_and_make_key();
             position_panel_from_tray(app_handle);
+            let _ = app_handle.emit("panel-did-show", ());
         }
     }
 
@@ -162,6 +155,7 @@ mod platform {
         event_handler.window_did_resign_key(move |_notification| {
             if let Ok(panel) = handle.get_webview_panel("main") {
                 panel.hide();
+                let _ = handle.emit("panel-did-hide", ());
             }
         });
         panel.set_event_handler(Some(event_handler.as_ref()));
@@ -243,10 +237,28 @@ mod platform {
 
 #[cfg(not(target_os = "macos"))]
 mod platform {
-    use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Position, Size};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Position, Size, WindowEvent};
 
     const WINDOW_MARGIN_PX: f64 = 12.0;
     const TRAY_GAP_PX: f64 = 8.0;
+    const TRAY_AUTO_HIDE_SUPPRESS_MS: u64 = 350;
+    static PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
+    static LAST_FOCUS_HIDE_MS: AtomicU64 = AtomicU64::new(0);
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum TrayToggleAction {
+        Show,
+        Hide,
+        Ignore,
+    }
+
+    enum HideReason {
+        Toggle,
+        FocusLoss,
+    }
 
     #[cfg(target_os = "windows")]
     fn remove_window_border(window: &tauri::WebviewWindow) {
@@ -270,6 +282,82 @@ mod platform {
 
     #[cfg(not(target_os = "windows"))]
     fn remove_window_border(_window: &tauri::WebviewWindow) {}
+
+    fn configure_transient_window(window: &tauri::WebviewWindow) {
+        remove_window_border(window);
+        if let Err(error) = window.set_skip_taskbar(true) {
+            log::warn!("Failed to hide panel window from taskbar: {}", error);
+        }
+    }
+
+    fn now_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
+    fn tray_toggle_action(
+        panel_is_visible: bool,
+        last_focus_hide_ms: u64,
+        now_ms: u64,
+    ) -> TrayToggleAction {
+        if panel_is_visible {
+            return TrayToggleAction::Hide;
+        }
+
+        if last_focus_hide_ms > 0
+            && now_ms.saturating_sub(last_focus_hide_ms) <= TRAY_AUTO_HIDE_SUPPRESS_MS
+        {
+            return TrayToggleAction::Ignore;
+        }
+
+        TrayToggleAction::Show
+    }
+
+    fn mark_panel_shown() {
+        PANEL_VISIBLE.store(true, Ordering::SeqCst);
+        LAST_FOCUS_HIDE_MS.store(0, Ordering::SeqCst);
+    }
+
+    fn mark_panel_hidden(reason: HideReason) {
+        PANEL_VISIBLE.store(false, Ordering::SeqCst);
+        let focus_hide_ms = match reason {
+            HideReason::Toggle => 0,
+            HideReason::FocusLoss => now_ms(),
+        };
+        LAST_FOCUS_HIDE_MS.store(focus_hide_ms, Ordering::SeqCst);
+    }
+
+    fn panel_is_visible(window: &tauri::WebviewWindow) -> bool {
+        PANEL_VISIBLE.load(Ordering::SeqCst) || window.is_visible().unwrap_or(false)
+    }
+
+    fn hide_panel_window(window: &tauri::WebviewWindow, reason: HideReason) {
+        mark_panel_hidden(reason);
+        if let Err(error) = window.hide() {
+            log::warn!("Failed to hide panel window: {}", error);
+        }
+        let _ = window.emit("panel-did-hide", ());
+    }
+
+    fn show_panel_window(app_handle: &AppHandle, window: &tauri::WebviewWindow) {
+        configure_transient_window(window);
+        position_window(app_handle, window);
+
+        if let Err(error) = window.show() {
+            log::warn!("Failed to show panel window: {}", error);
+            return;
+        }
+
+        if let Err(error) = window.set_focus() {
+            log::warn!("Failed to focus panel window: {}", error);
+        }
+
+        configure_transient_window(window);
+        mark_panel_shown();
+        let _ = app_handle.emit("panel-did-show", ());
+    }
 
     fn physical_position(position: &Position) -> (f64, f64) {
         match position {
@@ -365,21 +453,20 @@ mod platform {
 
     pub fn init(app_handle: &AppHandle) -> tauri::Result<()> {
         if let Some(window) = app_handle.get_webview_window("main") {
-            remove_window_border(&window);
+            configure_transient_window(&window);
+            window.on_window_event({
+                let window = window.clone();
+                move |event| {
+                    if matches!(event, WindowEvent::Focused(false))
+                        && PANEL_VISIBLE.load(Ordering::SeqCst)
+                    {
+                        hide_panel_window(&window, HideReason::FocusLoss);
+                    }
+                }
+            });
             window.hide()?;
         }
         Ok(())
-    }
-
-    pub fn show_panel(app_handle: &AppHandle) {
-        if let Some(window) = app_handle.get_webview_window("main") {
-            remove_window_border(&window);
-            position_window(app_handle, &window);
-            let _ = app_handle.emit("panel-will-show", ());
-            let _ = window.show();
-            let _ = window.set_focus();
-            remove_window_border(&window);
-        }
     }
 
     pub fn toggle_panel(app_handle: &AppHandle) {
@@ -387,20 +474,42 @@ mod platform {
             return;
         };
 
-        match window.is_visible() {
-            Ok(true) => {
-                let _ = window.hide();
-            }
-            _ => {
-                remove_window_border(&window);
-                position_window(app_handle, &window);
-                let _ = app_handle.emit("panel-will-show", ());
-                let _ = window.show();
-                let _ = window.set_focus();
-                remove_window_border(&window);
-            }
+        match tray_toggle_action(
+            panel_is_visible(&window),
+            LAST_FOCUS_HIDE_MS.load(Ordering::SeqCst),
+            now_ms(),
+        ) {
+            TrayToggleAction::Hide => hide_panel_window(&window, HideReason::Toggle),
+            TrayToggleAction::Ignore => {}
+            TrayToggleAction::Show => show_panel_window(app_handle, &window),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn tray_click_hides_when_panel_is_marked_visible() {
+            assert_eq!(tray_toggle_action(true, 0, 1_000), TrayToggleAction::Hide);
+        }
+
+        #[test]
+        fn tray_click_after_focus_auto_hide_is_consumed() {
+            assert_eq!(
+                tray_toggle_action(false, 900, 1_000),
+                TrayToggleAction::Ignore
+            );
+        }
+
+        #[test]
+        fn tray_click_shows_when_panel_has_been_hidden_for_a_while() {
+            assert_eq!(
+                tray_toggle_action(false, 100, 1_000),
+                TrayToggleAction::Show
+            );
         }
     }
 }
 
-pub use platform::{init, show_panel, toggle_panel};
+pub use platform::{init, toggle_panel};

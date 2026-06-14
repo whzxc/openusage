@@ -6,14 +6,20 @@
 
 Codex 用量只读取 Codex 相关数据：
 
-- 5 小时 session 使用率。
-- 7 天 weekly 使用率。
-- code review 使用率。
-- credits 余额和按 `$0.04` 估算的美元价值。
-- reset credits 可用数量。
-- 本地 `ccusage` 汇总的今日、昨日、近 30 天 token 和模型分布。
+- 7 天 weekly 使用率，作为面板里的主限额。
+- 5 小时 session 使用率，作为面板里的次级限额。
+- 订阅类型，例如 `Pro 5x` 或 `Pro 20x`。
+- reset credits 可用数量，显示为“可重置 N 次”。
+- 本地 `ccusage` 汇总的今日、近 7 天、近 30 天 token 和美元价格。
+- 本地 `ccusage` 汇总的模型分布。
 
-远程限额会显示剩余额度、重置时间、距离重置的倒计时，以及当前已用比例相对线性时间进度是更快还是更慢。
+远程限额会显示剩余额度、已用比例、重置时间，以及当前消耗相对线性时间进度是更快还是更慢。重置时间支持在“剩余时间”和“固定时间”两种展示方式之间切换。
+
+面板不展示 credits 余额、credits 美元价值和 code review 限额。
+
+## 面板行为
+
+macOS 使用菜单栏 NSPanel。Windows 使用不显示任务栏图标的临时托盘窗口，从托盘图标附近弹出，窗口失焦后自动隐藏。托盘左右键点击都只切换面板，不显示右键菜单。
 
 ## 远程接口
 
@@ -62,7 +68,7 @@ GET https://chatgpt.com/backend-api/wham/usage
 }
 ```
 
-`prolite` 显示为 `Pro 5x`，`pro` 显示为 `Pro 20x`。credits 余额会向下取整展示，美元价值按每 credit `$0.04` 计算。
+`prolite` 显示为 `Pro 5x`，`pro` 显示为 `Pro 20x`。面板只展示订阅类型和可重置次数，不展示 credits。
 
 ## 登录文件
 

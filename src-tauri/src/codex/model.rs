@@ -30,6 +30,7 @@ pub struct CodexModelUsage {
 pub struct CodexLocalUsageSummary {
     pub today: CodexDayUsage,
     pub yesterday: CodexDayUsage,
+    pub last_7_days: CodexDayUsage,
     pub last_30_days: CodexDayUsage,
     pub models: Vec<CodexModelUsage>,
 }
