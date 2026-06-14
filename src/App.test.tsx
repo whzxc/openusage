@@ -83,6 +83,38 @@ test("renders codex usage snapshot", async () => {
   expect(screen.getByText("gpt-5.5")).toBeInTheDocument()
 })
 
+test("shows reset countdown and usage pace against elapsed time", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] })
+  vi.setSystemTime(new Date("2026-06-13T17:00:00Z"))
+  vi.mocked(invoke).mockImplementation((command) => {
+    if (command === "get_log_path") return Promise.resolve("Codex 用量.log")
+    return Promise.resolve({
+      ...snapshot,
+      session: {
+        label: "5 小时限额",
+        usedPercent: 60,
+        resetsAt: "2026-06-13T18:30:00Z",
+        periodDurationMs: 18_000_000,
+      },
+      reviews: {
+        label: "代码评审",
+        usedPercent: 80,
+        resetsAt: "2026-06-13T18:30:00Z",
+        periodDurationMs: 18_000_000,
+      },
+      weekly: null,
+    })
+  })
+
+  render(<App />)
+
+  expect(await screen.findAllByText("还剩 1 小时 30 分")).toHaveLength(2)
+  expect(screen.getByText("已用 60% · 时间 70% · 慢 10%")).toBeInTheDocument()
+  expect(screen.getByText("已用 80% · 时间 70% · 快 10%")).toBeInTheDocument()
+  expect(screen.getByLabelText("5 小时限额 时间进度 70%")).toHaveStyle({ left: "30%" })
+  expect(screen.getByLabelText("代码评审 时间进度 70%")).toHaveStyle({ left: "30%" })
+})
+
 test("refreshes codex usage on demand", async () => {
   const user = userEvent.setup()
   render(<App />)

@@ -47,6 +47,7 @@ type CodexUsageSnapshot = {
 }
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000
+const COUNTDOWN_INTERVAL_MS = 60 * 1000
 
 function App() {
   const [snapshot, setSnapshot] = useState<CodexUsageSnapshot | null>(null)
@@ -57,6 +58,7 @@ function App() {
   const [autostartLoading, setAutostartLoading] = useState(false)
   const [logPath, setLogPath] = useState<string | null>(null)
   const [animationKey, setAnimationKey] = useState(0)
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
   const loadSnapshot = useCallback(async (manual: boolean) => {
     if (manual) {
@@ -124,6 +126,16 @@ function App() {
     return () => {
       disposed = true
       unlisten?.()
+    }
+  }, [])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNowMs(Date.now())
+    }, COUNTDOWN_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(interval)
     }
   }, [])
 
@@ -202,7 +214,7 @@ function App() {
               {limitMetrics.length > 0 ? (
                 <div className="metric-list">
                   {limitMetrics.map((metric) => (
-                    <LimitMetric key={metric.label} metric={metric} />
+                    <LimitMetric key={metric.label} metric={metric} nowMs={nowMs} />
                   ))}
                 </div>
               ) : (
@@ -277,8 +289,10 @@ function SummaryTile({ label, value, detail }: { label: string; value: string; d
   )
 }
 
-function LimitMetric({ metric }: { metric: CodexMetric }) {
+function LimitMetric({ metric, nowMs }: { metric: CodexMetric; nowMs: number }) {
   const remainingPercent = clampPercent(100 - metric.usedPercent)
+  const resetCountdown = metric.resetsAt ? formatResetCountdown(metric.resetsAt, nowMs) : null
+  const pace = calculateMetricPace(metric, nowMs)
 
   return (
     <article className="limit-metric">
@@ -288,8 +302,19 @@ function LimitMetric({ metric }: { metric: CodexMetric }) {
       </div>
       <div className="progress-track" aria-label={`${metric.label} 剩余 ${formatPercent(remainingPercent)}`}>
         <div className="progress-fill" style={{ width: `${remainingPercent}%` }} />
+        {pace ? (
+          <span
+            className="progress-marker"
+            aria-label={`${metric.label} 时间进度 ${formatPercent(pace.elapsedPercent)}`}
+            style={{ left: `${pace.timeRemainingPercent}%` }}
+          />
+        ) : null}
       </div>
-      <small>{metric.resetsAt ? `${formatReset(metric.resetsAt)} 重置` : "重置时间未知"}</small>
+      <div className="metric-reset-row">
+        <small>{metric.resetsAt ? `${formatReset(metric.resetsAt)} 重置` : "重置时间未知"}</small>
+        {resetCountdown ? <small>{resetCountdown}</small> : null}
+      </div>
+      {pace ? <small className="pace-line">{pace.label}</small> : null}
     </article>
   )
 }
@@ -396,6 +421,58 @@ function formatReset(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+function formatResetCountdown(value: string, nowMs: number): string | null {
+  const resetsAtMs = Date.parse(value)
+  if (!Number.isFinite(resetsAtMs) || !Number.isFinite(nowMs)) return null
+  const remainingMs = resetsAtMs - nowMs
+  if (remainingMs <= 0) return "已重置"
+  return `还剩 ${formatDuration(remainingMs)}`
+}
+
+function formatDuration(valueMs: number): string {
+  const totalMinutes = Math.max(1, Math.ceil(valueMs / 60_000))
+  const days = Math.floor(totalMinutes / 1_440)
+  const hours = Math.floor((totalMinutes % 1_440) / 60)
+  const minutes = totalMinutes % 60
+
+  if (days > 0) {
+    return hours > 0 ? `${days} 天 ${hours} 小时` : `${days} 天`
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours} 小时 ${minutes} 分` : `${hours} 小时`
+  }
+  return `${minutes} 分`
+}
+
+function calculateMetricPace(metric: CodexMetric, nowMs: number) {
+  if (!metric.resetsAt || !metric.periodDurationMs || metric.periodDurationMs <= 0) return null
+  const resetsAtMs = Date.parse(metric.resetsAt)
+  if (!Number.isFinite(resetsAtMs) || !Number.isFinite(nowMs)) return null
+
+  const elapsedMs = nowMs - (resetsAtMs - metric.periodDurationMs)
+  if (elapsedMs <= 0 || nowMs >= resetsAtMs) return null
+
+  const elapsedPercent = clampPercent((elapsedMs / metric.periodDurationMs) * 100)
+  const usedPercent = clampPercent(metric.usedPercent)
+  const deltaPercent = Math.round(usedPercent - elapsedPercent)
+  const timeText = formatPercent(elapsedPercent)
+  const usedText = formatPercent(usedPercent)
+
+  if (deltaPercent === 0) {
+    return {
+      elapsedPercent,
+      timeRemainingPercent: clampPercent(100 - elapsedPercent),
+      label: `已用 ${usedText} · 时间 ${timeText} · 持平`,
+    }
+  }
+
+  return {
+    elapsedPercent,
+    timeRemainingPercent: clampPercent(100 - elapsedPercent),
+    label: `已用 ${usedText} · 时间 ${timeText} · ${deltaPercent > 0 ? "快" : "慢"} ${Math.abs(deltaPercent)}%`,
+  }
 }
 
 function localUsageStatusLabel(status: string): string {
