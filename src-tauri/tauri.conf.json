@@ -30,8 +30,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app"],
     "macOS": {
+      "signingIdentity": "-",
       "dmg": {
         "appPosition": {
           "x": 180,
